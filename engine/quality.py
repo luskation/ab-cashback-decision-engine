@@ -233,12 +233,71 @@ def checar_cobertura_de_datas(df: pd.DataFrame) -> list[QualityIssue]:
     return issues
 
 
+def checar_colapso_de_volume_no_fim_da_serie(
+    df: pd.DataFrame,
+    coluna: str = "compradores",
+    fracao_final: float = 0.1,
+    minimo_dias_finais: int = 5,
+    z_maximo: float = -2.0,
+) -> list[QualityIssue]:
+    issues = []
+    for parceiro, df_p in df.groupby("parceiro"):
+        grupos = list(df_p.groupby("grupo"))
+        colapsos = {}
+        for grupo, grupo_df in grupos:
+            serie = _serie_diaria(grupo_df, coluna)
+            n = len(serie)
+            k = max(minimo_dias_finais, int(round(n * fracao_final)))
+            if n < k + minimo_dias_finais:
+                continue  # histórico insuficiente antes do fim para comparar com confiança
+            resto, finais = serie.iloc[:-k], serie.iloc[-k:]
+            std_resto = resto.std(ddof=1) or 1e-9
+            z = (finais.mean() - resto.mean()) / std_resto
+            if z <= z_maximo:
+                colapsos[grupo] = {
+                    "z": z,
+                    "media_resto": resto.mean(),
+                    "media_final": finais.mean(),
+                    "k": k,
+                    "inicio": finais.index.min(),
+                    "fim": finais.index.max(),
+                }
+        if not colapsos:
+            continue
+        todos_os_grupos_colapsaram = len(colapsos) == len(grupos) and len(grupos) > 1
+        if todos_os_grupos_colapsaram:
+            continue
+        for grupo, info in colapsos.items():
+            issues.append(QualityIssue(
+                checagem="colapso_de_volume_fim_serie",
+                severidade="critico",
+                parceiro=parceiro,
+                grupo=grupo,
+                mensagem=(
+                    f"'{coluna}' de {grupo} despenca nos últimos {info['k']} dias da série: média cai de "
+                    f"{info['media_resto']:.0f} para {info['media_final']:.0f} (z={info['z']:.1f}), e a "
+                    "queda não aparece nos demais grupos do mesmo teste no mesmo período — investigar "
+                    "antes de confiar no resultado (possível bug de instrumentação isolado ao grupo)."
+                ),
+                detalhes={
+                    "z": float(info["z"]),
+                    "media_resto": float(info["media_resto"]),
+                    "media_final": float(info["media_final"]),
+                    "dias_finais": info["k"],
+                    "inicio": str(info["inicio"].date()),
+                    "fim": str(info["fim"].date()),
+                },
+            ))
+    return issues
+
+
 CHECAGENS_PADRAO = [
     checar_desequilibrio_populacional,
     checar_bug_instrumentacao,
     checar_mudanca_de_patamar,
     checar_pico_sincronizado,
     checar_cobertura_de_datas,
+    checar_colapso_de_volume_no_fim_da_serie,
 ]
 
 
