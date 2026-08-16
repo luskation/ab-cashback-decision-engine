@@ -9,6 +9,7 @@ from engine.quality import (
     checar_desequilibrio_populacional,
     checar_mudanca_de_patamar,
     checar_pico_sincronizado,
+    checar_repasse_total_de_cashback,
 )
 
 
@@ -245,6 +246,51 @@ def test_colapso_de_volume_reproduz_o_achado_real_no_parceiro_c():
     for arquivo in ["dataset_01_parceiroA.csv", "dataset_02_parceiroB.csv"]:
         df, _ = carregar_csv(dados / arquivo)
         assert checar_colapso_de_volume_no_fim_da_serie(df) == []
+
+
+def test_repasse_total_de_cashback_detecta_grupo_com_comissao_igual_a_cashback():
+    datas = pd.date_range("2024-01-01", periods=10)
+    comissao = [1000.0, 1100.0, 950.0, 1200.0, 1050.0, 980.0, 1010.0, 1090.0, 970.0, 1030.0]
+    df = _dataset("Parceiro X", {
+        "Grupo 1": _serie_base(datas, compradores=[100] * 10, comissao=comissao, cashback=[200.0] * 10),
+        "Grupo 2": _serie_base(datas, compradores=[100] * 10, comissao=comissao, cashback=comissao),
+    })
+    issues = checar_repasse_total_de_cashback(df)
+    assert len(issues) == 1
+    assert issues[0].grupo == "Grupo 2"
+    assert issues[0].detalhes["fracao_dias_repasse_total"] == 1.0
+
+
+def test_repasse_total_de_cashback_nao_dispara_quando_cashback_e_bem_menor_que_comissao():
+    datas = pd.date_range("2024-01-01", periods=10)
+    df = _dataset("Parceiro X", {
+        "Grupo 1": _serie_base(datas, compradores=[100] * 10, comissao=[1000.0] * 10, cashback=[200.0] * 10),
+    })
+    assert checar_repasse_total_de_cashback(df) == []
+
+
+def test_repasse_total_de_cashback_ignora_dias_com_comissao_zero():
+    datas = pd.date_range("2024-01-01", periods=5)
+    df = _dataset("Parceiro X", {
+        "Grupo 1": _serie_base(datas, compradores=[100] * 5, comissao=[0.0] * 5, cashback=[0.0] * 5),
+    })
+    assert checar_repasse_total_de_cashback(df) == []
+
+
+def test_repasse_total_de_cashback_fixture_reproduz_achado_real_no_parceiro_c():
+    from pathlib import Path
+
+    from engine.parsing import carregar_csv
+
+    df, _ = carregar_csv(Path(__file__).parent.parent / "data" / "dataset_03_parceiroC.csv")
+    issues = checar_repasse_total_de_cashback(df)
+    assert len(issues) == 1
+    assert issues[0].grupo == "Grupo 2"
+    assert issues[0].parceiro == "Parceiro C"
+
+    for arquivo in ["dataset_01_parceiroA.csv", "dataset_02_parceiroB.csv"]:
+        df, _ = carregar_csv(Path(__file__).parent.parent / "data" / arquivo)
+        assert checar_repasse_total_de_cashback(df) == []
 
 
 @pytest.mark.parametrize("arquivo", [

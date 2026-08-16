@@ -291,6 +291,37 @@ def checar_colapso_de_volume_no_fim_da_serie(
     return issues
 
 
+def checar_repasse_total_de_cashback(
+    df: pd.DataFrame,
+    limiar_proximidade_relativa: float = 0.02,
+    limiar_fracao_dias: float = 0.9,
+) -> list[QualityIssue]:
+    """Detecta grupos onde o cashback pago é praticamente igual à comissão recebida
+    (repasse de ~100% da comissão) na maior parte dos dias. Nesses casos a margem
+    (comissão - cashback) é ~zero por construção, não por um efeito do teste — muda como
+    o resultado estatístico da comparação de margem deve ser lido."""
+    issues = []
+    for (parceiro, grupo), grupo_df in df.groupby(["parceiro", "grupo"]):
+        comissao_segura = grupo_df["comissao"].where(grupo_df["comissao"] > 0)
+        proximidade_relativa = (grupo_df["cashback"] - comissao_segura).abs() / comissao_segura
+        fracao_repasse_total = (proximidade_relativa <= limiar_proximidade_relativa).mean()
+        if fracao_repasse_total >= limiar_fracao_dias:
+            issues.append(QualityIssue(
+                checagem="repasse_total_de_cashback",
+                severidade="aviso",
+                parceiro=parceiro,
+                grupo=grupo,
+                mensagem=(
+                    f"{grupo} repassa ~100% da comissão como cashback em {fracao_repasse_total:.0%} "
+                    "dos dias — a margem (comissão - cashback) desse grupo é próxima de zero por "
+                    "desenho, não por efeito do teste; interprete a comparação de margem com essa "
+                    "ressalva."
+                ),
+                detalhes={"fracao_dias_repasse_total": float(fracao_repasse_total)},
+            ))
+    return issues
+
+
 CHECAGENS_PADRAO = [
     checar_desequilibrio_populacional,
     checar_bug_instrumentacao,
@@ -298,6 +329,7 @@ CHECAGENS_PADRAO = [
     checar_pico_sincronizado,
     checar_cobertura_de_datas,
     checar_colapso_de_volume_no_fim_da_serie,
+    checar_repasse_total_de_cashback,
 ]
 
 
