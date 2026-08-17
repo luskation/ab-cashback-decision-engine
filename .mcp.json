@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ab-cashback-decision-engine": {
+      "command": "python",
+      "args": ["-m", "mcp_server.server"]
+    }
+  }
+}

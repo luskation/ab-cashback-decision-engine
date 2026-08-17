@@ -5,3 +5,4 @@ matplotlib>=3.7
 pytest>=7.4
 gspread>=5.10
 google-auth>=2.20
+mcp>=1.9,<2.0
