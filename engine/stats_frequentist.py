@@ -43,7 +43,7 @@ def inferir_grupo_baseline(grupos: list[str]) -> str:
     """Sem convenção explícita no dataset, assume o grupo de menor rótulo em ordem natural
     (ex: 'Grupo 1' antes de 'Grupo 2') como baseline. Não depende de nome de parceiro/grupo
     específico — funciona para qualquer rotulagem consistente entre os testes."""
-    return sorted(grupos)[0]
+    return min(grupos)
 
 
 def _parear_por_data(df_parceiro: pd.DataFrame, baseline: str, variante: str, coluna: str) -> pd.DataFrame:

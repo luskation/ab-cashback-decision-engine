@@ -129,10 +129,10 @@ def test_registrar_sem_planilha_id_so_grava_csv(tmp_path):
     "dataset_03_parceiroC.csv",
 ])
 def test_registrar_roda_sem_erro_nos_datasets_reais(arquivo, tmp_path):
-    from engine.parsing import carregar_csv
-    from engine.stats_frequentist import comparar_todos_os_grupos
     from engine.decision import decidir_todos
     from engine.growth import growth_lens
+    from engine.parsing import carregar_csv
+    from engine.stats_frequentist import comparar_todos_os_grupos
 
     df, _ = carregar_csv(Path(__file__).parent.parent / "data" / arquivo)
     comparacoes = comparar_todos_os_grupos(df)

@@ -135,9 +135,9 @@ def test_growth_lens_nao_calcula_projecao_sem_vencedor():
     "dataset_03_parceiroC.csv",
 ])
 def test_growth_lens_roda_sem_erro_nos_datasets_reais(arquivo):
+    from engine.decision import decidir_todos
     from engine.parsing import carregar_csv
     from engine.stats_frequentist import comparar_todos_os_grupos
-    from engine.decision import decidir_todos
 
     df, _ = carregar_csv(Path(__file__).parent.parent / "data" / arquivo)
     for decisao in decidir_todos(comparar_todos_os_grupos(df)):

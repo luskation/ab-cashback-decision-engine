@@ -10,7 +10,13 @@ from engine.growth import growth_lens
 from engine.parsing import SchemaError, carregar_csv
 from engine.quality import avaliar_qualidade
 from engine.report import gerar_relatorio_completo
-from engine.stats_frequentist import ParDadosInsuficientesError, comparar_todos_os_grupos
+from engine.stats_bayesian import posterior_todos_os_grupos
+from engine.stats_frequentist import (
+    ParDadosInsuficientesError,
+    comparar_todos_os_grupos,
+    corrigir_multiplas_comparacoes,
+)
+from engine.stats_robustness import bootstrap_todos_os_grupos
 from engine.tracking import registrar
 
 logger = logging.getLogger("cli")
@@ -96,7 +102,12 @@ def processar_dataset(
         logger.warning("%s: só um grupo presente, nada a comparar.", caminho.name)
         return False
 
-    decisoes = decidir_todos(comparacoes, alfa=alfa)
+    correcoes = corrigir_multiplas_comparacoes(comparacoes, alfa=alfa)
+    bootstraps = bootstrap_todos_os_grupos(df)
+    posteriores = posterior_todos_os_grupos(df)
+    decisoes = decidir_todos(
+        comparacoes, alfa=alfa, correcoes=correcoes, bootstraps=bootstraps, posteriores=posteriores
+    )
     lentes = [growth_lens(df, decisao) for decisao in decisoes]
 
     print("\nDecisões:")
@@ -105,8 +116,10 @@ def processar_dataset(
             f"  {decisao.grupo_variante} vs {decisao.grupo_baseline}: "
             f"{decisao.veredito} (confiança {decisao.confianca})"
         )
+        if decisao.divergencia:
+            print(f"    divergência: {decisao.divergencia}")
 
-    caminho_relatorio = gerar_relatorio_completo(df, diretorio_saida=diretorio_saida)
+    caminho_relatorio = gerar_relatorio_completo(df, diretorio_saida=diretorio_saida, alfa=alfa)
     print(f"\nRelatório: {caminho_relatorio}")
 
     registrar(decisoes, lentes, caminho_csv=caminho_tracking, planilha_id=planilha_id)

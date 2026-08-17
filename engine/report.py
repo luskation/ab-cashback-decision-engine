@@ -14,7 +14,13 @@ from engine.decision import Decisao, decidir_todos
 from engine.growth import GrowthLens, growth_lens
 from engine.quality import QualityIssue, avaliar_qualidade
 from engine.stats_bayesian import PosteriorBayesiano, posterior_todos_os_grupos
-from engine.stats_frequentist import ComparacaoPareada, calcular_margem, comparar_todos_os_grupos
+from engine.stats_frequentist import (
+    ComparacaoPareada,
+    calcular_margem,
+    comparar_todos_os_grupos,
+    corrigir_multiplas_comparacoes,
+)
+from engine.stats_robustness import bootstrap_todos_os_grupos
 
 COR_SURFACE = "#fcfcfb"
 COR_TINTA_PRIMARIA = "#0b0b0b"
@@ -183,6 +189,28 @@ def _apendice_tecnico(comparacao: ComparacaoPareada) -> str:
     )
 
 
+def _apendice_tecnico_camadas_extras(decisao: Decisao) -> str:
+    """Detalhe técnico da correção de múltiplas comparações e do bootstrap em bloco, quando
+    a decisão foi reconciliada com elas (`decision.py`, Fase 13) — mesmo tratamento do
+    apêndice bayesiano: jargão vai aqui, nunca no corpo principal do relatório."""
+    linhas = []
+    correcao = decisao.camadas_extras.get("correcao_multipla")
+    if correcao is not None:
+        linhas.append(
+            f"  - correção Benjamini-Hochberg (múltiplas comparações): t ajustado="
+            f"{correcao.t_p_valor_ajustado:.4f}, Wilcoxon ajustado={correcao.wilcoxon_p_valor_ajustado:.4f}, "
+            f"significativo após correção={correcao.significativo_corrigido}"
+        )
+    bootstrap = decisao.camadas_extras.get("bootstrap")
+    if bootstrap is not None:
+        linhas.append(
+            f"  - bootstrap em bloco ({bootstrap.n_reamostragens} reamostragens, bloco="
+            f"{bootstrap.tamanho_bloco} dias): IC95=({bootstrap.ic95_diferenca[0]:.2f}, "
+            f"{bootstrap.ic95_diferenca[1]:.2f}), contém zero={bootstrap.contem_zero}"
+        )
+    return "\n".join(linhas)
+
+
 def gerar_relatorio_markdown(
     parceiro: str,
     resultados: list[tuple[ComparacaoPareada, Decisao, GrowthLens]],
@@ -201,9 +229,11 @@ def gerar_relatorio_markdown(
     linhas = [f"# Teste A/B — {parceiro}", "", "## Resumo executivo", ""]
     for _, decisao, _ in resultados:
         linhas.append(f"- {_frase_executiva(decisao)}")
+        if decisao.divergencia:
+            linhas.append(f"  - **Divergência entre camadas:** {decisao.divergencia}")
 
     linhas += ["", f"![Margem diária por grupo]({caminho_grafico.name})", "", "## Racional", ""]
-    for comparacao, _, lente in resultados:
+    for comparacao, decisao, lente in resultados:
         linhas.append(f"### {comparacao.grupo_baseline} vs {comparacao.grupo_variante}")
         linhas.append("")
         linhas.append(_paragrafo_racional(comparacao))
@@ -213,14 +243,20 @@ def gerar_relatorio_markdown(
         if posterior is not None:
             linhas.append("")
             linhas.append(_paragrafo_bayesiano(posterior))
+        if decisao.camadas_extras:
+            linhas.append("")
+            linhas.append(f"_{decisao.justificativa}_")
         linhas.append("")
 
     linhas += ["## Ressalvas", "", _secao_ressalvas(quality_issues), "", "## Apêndice técnico", ""]
-    for comparacao, _, _ in resultados:
+    for comparacao, decisao, _ in resultados:
         linhas.append(_apendice_tecnico(comparacao))
         posterior = posteriores.get(comparacao.grupo_variante)
         if posterior is not None:
             linhas.append(_apendice_tecnico_bayesiano(posterior))
+        extras = _apendice_tecnico_camadas_extras(decisao)
+        if extras:
+            linhas.append(extras)
         linhas.append("")
 
     caminho_saida.parent.mkdir(parents=True, exist_ok=True)
@@ -228,9 +264,14 @@ def gerar_relatorio_markdown(
     return caminho_saida
 
 
-def gerar_relatorio_completo(df: pd.DataFrame, diretorio_saida: Path = Path("reports")) -> Path:
-    """Roda qualidade, estatística, decisão e growth lens sobre um DataFrame de um único
-    parceiro (o formato natural de cada CSV carregado) e escreve gráfico + relatório."""
+def gerar_relatorio_completo(
+    df: pd.DataFrame, diretorio_saida: Path = Path("reports"), alfa: float = 0.05
+) -> Path:
+    """Roda qualidade, estatística (frequentista + correção de múltiplas comparações +
+    bootstrap em bloco + bayesiano) e growth lens sobre um DataFrame de um único parceiro
+    (o formato natural de cada CSV carregado), reconcilia as camadas numa decisão única
+    (Fase 13) e escreve gráfico + relatório — a mesma reconciliação completa que `cli.py` e
+    `mcp_server/server.py` usam para tracking, nunca uma versão só-frequentista mais pobre."""
     parceiros = df["parceiro"].unique()
     if len(parceiros) != 1:
         raise ValueError(f"esperado um único parceiro no DataFrame, recebido: {sorted(parceiros)}")
@@ -245,12 +286,17 @@ def gerar_relatorio_completo(df: pd.DataFrame, diretorio_saida: Path = Path("rep
 
     quality_issues = avaliar_qualidade(df)
     comparacoes = comparar_todos_os_grupos(df)
-    decisoes = decidir_todos(comparacoes)
+    correcoes = corrigir_multiplas_comparacoes(comparacoes, alfa=alfa)
+    bootstraps = bootstrap_todos_os_grupos(df)
+    posteriores_lista = posterior_todos_os_grupos(df)
+    decisoes = decidir_todos(
+        comparacoes, alfa=alfa, correcoes=correcoes, bootstraps=bootstraps, posteriores=posteriores_lista
+    )
     resultados = [
         (comparacao, decisao, growth_lens(df, decisao))
         for comparacao, decisao in zip(comparacoes, decisoes)
     ]
-    posteriores = {p.grupo_variante: p for p in posterior_todos_os_grupos(df)}
+    posteriores = {p.grupo_variante: p for p in posteriores_lista}
 
     return gerar_relatorio_markdown(
         parceiro, resultados, quality_issues, caminho_grafico, caminho_relatorio, posteriores=posteriores

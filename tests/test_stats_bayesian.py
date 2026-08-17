@@ -2,11 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.stats_frequentist import ParDadosInsuficientesError, comparar_grupo
 from engine.stats_bayesian import (
     posterior_diferenca_margem,
     posterior_todos_os_grupos,
 )
+from engine.stats_frequentist import ParDadosInsuficientesError, comparar_grupo
 
 
 def _dataset(parceiro: str, grupos: dict[str, pd.DataFrame]) -> pd.DataFrame:

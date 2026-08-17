@@ -247,7 +247,7 @@ def checar_colapso_de_volume_no_fim_da_serie(
         for grupo, grupo_df in grupos:
             serie = _serie_diaria(grupo_df, coluna)
             n = len(serie)
-            k = max(minimo_dias_finais, int(round(n * fracao_final)))
+            k = max(minimo_dias_finais, round(n * fracao_final))
             if n < k + minimo_dias_finais:
                 continue  # histórico insuficiente antes do fim para comparar com confiança
             resto, finais = serie.iloc[:-k], serie.iloc[-k:]
