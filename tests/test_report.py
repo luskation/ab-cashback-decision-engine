@@ -12,6 +12,7 @@ from engine.report import (
     gerar_relatorio_completo,
     gerar_relatorio_markdown,
 )
+from engine.stats_bayesian import PosteriorBayesiano
 from engine.stats_frequentist import ComparacaoPareada
 
 
@@ -121,6 +122,53 @@ def test_gerar_relatorio_markdown_contem_secoes_esperadas(tmp_path):
     assert "p=0.0010" in conteudo
     assert "R$ 400,00" in conteudo  # padrão pt-BR: vírgula decimal
     assert "R$ 400.00" not in conteudo  # nunca no padrão US
+
+
+def _posterior_bayesiano(grupo_variante="Grupo 2") -> PosteriorBayesiano:
+    return PosteriorBayesiano(
+        parceiro="Parceiro X",
+        grupo_baseline="Grupo 1",
+        grupo_variante=grupo_variante,
+        coluna="margem",
+        n_dias_pareados=53,
+        media_diferenca=-781.71,
+        ic95_diferenca=(-1119.59, -443.05),
+        probabilidade_variante_melhor=0.0,
+        perda_esperada_escalar=781.71,
+        perda_esperada_manter=0.0,
+    )
+
+
+def test_gerar_relatorio_markdown_traduz_saida_bayesiana_em_linguagem_de_negocio(tmp_path):
+    resultados = [(_comparacao(), _decisao("manter_baseline"), _growth_lens_com_projecao())]
+    posteriores = {"Grupo 2": _posterior_bayesiano()}
+    caminho = gerar_relatorio_markdown(
+        "Parceiro X", resultados, [], tmp_path / "grafico.png", tmp_path / "relatorio.md",
+        posteriores=posteriores,
+    )
+    conteudo = caminho.read_text(encoding="utf-8")
+
+    # corpo principal: linguagem de negócio, nunca jargão técnico (mitigação obrigatória, 2.12)
+    secao_principal = conteudo.split("## Apêndice técnico")[0]
+    assert "chance de Grupo 1 ser melhor" in secao_principal
+    assert "perda esperada seria de R$ 781,71/dia" in secao_principal
+    for jargao in ("posterior", "prior", "expected loss", "Student-t"):
+        assert jargao not in secao_principal
+
+    # apêndice técnico: aqui sim, jargão é esperado
+    assert "camada bayesiana" in conteudo
+    assert "prior de Jeffreys" in conteudo
+    assert "P(μ>0)=0.0000" in conteudo
+
+
+def test_gerar_relatorio_markdown_sem_posteriores_nao_menciona_camada_bayesiana(tmp_path):
+    resultados = [(_comparacao(), _decisao("escalar"), _growth_lens_com_projecao())]
+    caminho = gerar_relatorio_markdown(
+        "Parceiro X", resultados, [], tmp_path / "grafico.png", tmp_path / "relatorio.md"
+    )
+    conteudo = caminho.read_text(encoding="utf-8")
+    assert "camada bayesiana" not in conteudo
+    assert "chance de" not in conteudo
 
 
 def test_gerar_relatorio_markdown_lista_ressalvas_quando_ha_issues(tmp_path):

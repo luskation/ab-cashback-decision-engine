@@ -13,6 +13,7 @@ import pandas as pd
 from engine.decision import Decisao, decidir_todos
 from engine.growth import GrowthLens, growth_lens
 from engine.quality import QualityIssue, avaliar_qualidade
+from engine.stats_bayesian import PosteriorBayesiano, posterior_todos_os_grupos
 from engine.stats_frequentist import ComparacaoPareada, calcular_margem, comparar_todos_os_grupos
 
 COR_SURFACE = "#fcfcfb"
@@ -131,6 +132,40 @@ def _paragrafo_growth(lente: GrowthLens) -> str:
     return " ".join(partes)
 
 
+def _paragrafo_bayesiano(posterior: PosteriorBayesiano) -> str:
+    """Traduz a saída do modelo bayesiano para linguagem de negócio — mitigação obrigatória
+    da seção 2.12 do plano: nunca usar 'posterior', 'prior' ou 'expected loss' aqui, isso é
+    jargão técnico e só pertence ao apêndice. Sem essa tradução, a camada bayesiana viola a
+    exigência de relatório "apresentável para um gestor" em vez de reforçá-la."""
+    p = posterior.probabilidade_variante_melhor
+    if p >= 0.5:
+        chance, quem_e_melhor = p, posterior.grupo_variante
+        frase_risco = (
+            f"se mantivéssemos {posterior.grupo_baseline} por engano, a perda esperada seria de "
+            f"{_formatar_moeda(posterior.perda_esperada_manter)}/dia"
+        )
+    else:
+        chance, quem_e_melhor = 1 - p, posterior.grupo_baseline
+        frase_risco = (
+            f"se escalássemos {posterior.grupo_variante} por engano, a perda esperada seria de "
+            f"{_formatar_moeda(posterior.perda_esperada_escalar)}/dia"
+        )
+    return (
+        f"Do ponto de vista de risco: há {chance:.0%} de chance de {quem_e_melhor} ser melhor; "
+        f"{frase_risco}."
+    )
+
+
+def _apendice_tecnico_bayesiano(posterior: PosteriorBayesiano) -> str:
+    return (
+        f"  - camada bayesiana (prior de Jeffreys, posterior Student-t): "
+        f"P(μ>0)={posterior.probabilidade_variante_melhor:.4f}, "
+        f"IC95 credível=({posterior.ic95_diferenca[0]:.2f}, {posterior.ic95_diferenca[1]:.2f}), "
+        f"perda esperada de escalar={posterior.perda_esperada_escalar:.2f}, "
+        f"perda esperada de manter={posterior.perda_esperada_manter:.2f}"
+    )
+
+
 def _secao_ressalvas(issues: list[QualityIssue]) -> str:
     if not issues:
         return "Nenhum problema de qualidade de dados identificado neste teste."
@@ -154,9 +189,14 @@ def gerar_relatorio_markdown(
     quality_issues: list[QualityIssue],
     caminho_grafico: Path,
     caminho_saida: Path,
+    posteriores: dict[str, PosteriorBayesiano] | None = None,
 ) -> Path:
+    """`posteriores`, se informado, mapeia grupo_variante -> PosteriorBayesiano (Fase 12,
+    Nível 3, opcional) — quando presente, soma uma leitura de risco em linguagem de negócio
+    ao racional e o detalhe técnico ao apêndice; ausente, o relatório sai igual a antes."""
     caminho_grafico = Path(caminho_grafico)
     caminho_saida = Path(caminho_saida)
+    posteriores = posteriores or {}
 
     linhas = [f"# Teste A/B — {parceiro}", "", "## Resumo executivo", ""]
     for _, decisao, _ in resultados:
@@ -169,11 +209,18 @@ def gerar_relatorio_markdown(
         linhas.append(_paragrafo_racional(comparacao))
         linhas.append("")
         linhas.append(_paragrafo_growth(lente))
+        posterior = posteriores.get(comparacao.grupo_variante)
+        if posterior is not None:
+            linhas.append("")
+            linhas.append(_paragrafo_bayesiano(posterior))
         linhas.append("")
 
     linhas += ["## Ressalvas", "", _secao_ressalvas(quality_issues), "", "## Apêndice técnico", ""]
     for comparacao, _, _ in resultados:
         linhas.append(_apendice_tecnico(comparacao))
+        posterior = posteriores.get(comparacao.grupo_variante)
+        if posterior is not None:
+            linhas.append(_apendice_tecnico_bayesiano(posterior))
         linhas.append("")
 
     caminho_saida.parent.mkdir(parents=True, exist_ok=True)
@@ -203,5 +250,8 @@ def gerar_relatorio_completo(df: pd.DataFrame, diretorio_saida: Path = Path("rep
         (comparacao, decisao, growth_lens(df, decisao))
         for comparacao, decisao in zip(comparacoes, decisoes)
     ]
+    posteriores = {p.grupo_variante: p for p in posterior_todos_os_grupos(df)}
 
-    return gerar_relatorio_markdown(parceiro, resultados, quality_issues, caminho_grafico, caminho_relatorio)
+    return gerar_relatorio_markdown(
+        parceiro, resultados, quality_issues, caminho_grafico, caminho_relatorio, posteriores=posteriores
+    )
