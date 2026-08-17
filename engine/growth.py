@@ -38,7 +38,9 @@ def projetar_impacto(
 ) -> ProjecaoImpacto:
     """Projeta o ganho/perda diário de escalar `grupo_variante` para o volume de tráfego
     que hoje é atendido por `grupo_baseline` + `grupo_variante` juntos."""
-    df_parceiro = df[df["parceiro"] == parceiro].copy()
+    df_parceiro = df[
+        (df["parceiro"] == parceiro) & (df["grupo"].isin([grupo_baseline, grupo_variante]))
+    ].copy()
     compradores_seguro = df_parceiro["compradores"].where(df_parceiro["compradores"] > 0)
     df_parceiro["margem_por_comprador"] = calcular_margem(df_parceiro) / compradores_seguro
 

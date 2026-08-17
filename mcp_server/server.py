@@ -108,7 +108,17 @@ def processar_dataset(
     )
     lentes = [growth_lens(df, decisao) for decisao in decisoes]
 
-    caminho_relatorio = gerar_relatorio_completo(df, diretorio_saida=diretorio_saida, alfa=alfa)
+    caminho_relatorio = gerar_relatorio_completo(
+        df,
+        diretorio_saida=diretorio_saida,
+        alfa=alfa,
+        quality_issues=issues,
+        comparacoes=comparacoes,
+        correcoes=correcoes,
+        bootstraps=bootstraps,
+        posteriores_lista=posteriores,
+        decisoes=decisoes,
+    )
     registrar(decisoes, lentes, caminho_csv=caminho_tracking, planilha_id=sheet_id)
 
     return {

@@ -114,7 +114,8 @@ def registrar_google_sheets(
             aba_planilha = planilha.add_worksheet(title=aba, rows=1, cols=len(CAMPOS_TRACKING))
             aba_planilha.append_row(CAMPOS_TRACKING)
         for linha in linhas:
-            aba_planilha.append_row([str(getattr(linha, campo)) for campo in CAMPOS_TRACKING])
+            valores = (getattr(linha, campo) for campo in CAMPOS_TRACKING)
+            aba_planilha.append_row(["" if valor is None else str(valor) for valor in valores])
         return True
     except Exception:  # best-effort por design (2.8) — qualquer falha aqui não pode travar o pipeline.
         logger.exception("falha ao escrever no Google Sheets — tracking local em CSV já foi gravado.")

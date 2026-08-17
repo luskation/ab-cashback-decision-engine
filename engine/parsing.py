@@ -135,6 +135,8 @@ def carregar_csv(caminho: str | Path) -> tuple[pd.DataFrame, ParseReport]:
         bruto = pd.read_csv(caminho, dtype=str, keep_default_na=False)
     except pd.errors.EmptyDataError as exc:
         raise SchemaError(f"{caminho.name}: arquivo vazio ou sem cabeçalho") from exc
+    except pd.errors.ParserError as exc:
+        raise SchemaError(f"{caminho.name}: CSV malformado (ex: número de campos inconsistente entre linhas): {exc}") from exc
 
     report.linhas_lidas = len(bruto)
 

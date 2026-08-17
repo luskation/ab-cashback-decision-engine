@@ -119,7 +119,17 @@ def processar_dataset(
         if decisao.divergencia:
             print(f"    divergência: {decisao.divergencia}")
 
-    caminho_relatorio = gerar_relatorio_completo(df, diretorio_saida=diretorio_saida, alfa=alfa)
+    caminho_relatorio = gerar_relatorio_completo(
+        df,
+        diretorio_saida=diretorio_saida,
+        alfa=alfa,
+        quality_issues=issues,
+        comparacoes=comparacoes,
+        correcoes=correcoes,
+        bootstraps=bootstraps,
+        posteriores_lista=posteriores,
+        decisoes=decisoes,
+    )
     print(f"\nRelatório: {caminho_relatorio}")
 
     registrar(decisoes, lentes, caminho_csv=caminho_tracking, planilha_id=planilha_id)

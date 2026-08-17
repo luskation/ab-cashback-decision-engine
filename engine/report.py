@@ -16,11 +16,12 @@ from engine.quality import QualityIssue, avaliar_qualidade
 from engine.stats_bayesian import PosteriorBayesiano, posterior_todos_os_grupos
 from engine.stats_frequentist import (
     ComparacaoPareada,
+    CorrecaoMultipla,
     calcular_margem,
     comparar_todos_os_grupos,
     corrigir_multiplas_comparacoes,
 )
-from engine.stats_robustness import bootstrap_todos_os_grupos
+from engine.stats_robustness import BootstrapEmBloco, bootstrap_todos_os_grupos
 
 COR_SURFACE = "#fcfcfb"
 COR_TINTA_PRIMARIA = "#0b0b0b"
@@ -265,13 +266,27 @@ def gerar_relatorio_markdown(
 
 
 def gerar_relatorio_completo(
-    df: pd.DataFrame, diretorio_saida: Path = Path("reports"), alfa: float = 0.05
+    df: pd.DataFrame,
+    diretorio_saida: Path = Path("reports"),
+    alfa: float = 0.05,
+    quality_issues: list[QualityIssue] | None = None,
+    comparacoes: list[ComparacaoPareada] | None = None,
+    correcoes: list[CorrecaoMultipla] | None = None,
+    bootstraps: list[BootstrapEmBloco] | None = None,
+    posteriores_lista: list[PosteriorBayesiano] | None = None,
+    decisoes: list[Decisao] | None = None,
 ) -> Path:
     """Roda qualidade, estatística (frequentista + correção de múltiplas comparações +
     bootstrap em bloco + bayesiano) e growth lens sobre um DataFrame de um único parceiro
     (o formato natural de cada CSV carregado), reconcilia as camadas numa decisão única
     (Fase 13) e escreve gráfico + relatório — a mesma reconciliação completa que `cli.py` e
-    `mcp_server/server.py` usam para tracking, nunca uma versão só-frequentista mais pobre."""
+    `mcp_server/server.py` usam para tracking, nunca uma versão só-frequentista mais pobre.
+
+    Cada camada (`quality_issues`, `comparacoes`, `correcoes`, `bootstraps`,
+    `posteriores_lista`, `decisoes`) pode ser passada pronta por quem já a calculou segundos
+    antes (`cli.py`, `mcp_server/server.py`) para não pagar o bootstrap e a camada bayesiana
+    duas vezes; ausente, é calculada aqui do zero — chamar a função sozinha continua
+    funcionando sem exigir nenhuma dessas camadas."""
     parceiros = df["parceiro"].unique()
     if len(parceiros) != 1:
         raise ValueError(f"esperado um único parceiro no DataFrame, recebido: {sorted(parceiros)}")
@@ -284,13 +299,21 @@ def gerar_relatorio_completo(
 
     gerar_grafico_margem_diaria(df, parceiro, caminho_grafico)
 
-    quality_issues = avaliar_qualidade(df)
-    comparacoes = comparar_todos_os_grupos(df)
-    correcoes = corrigir_multiplas_comparacoes(comparacoes, alfa=alfa)
-    bootstraps = bootstrap_todos_os_grupos(df)
-    posteriores_lista = posterior_todos_os_grupos(df)
-    decisoes = decidir_todos(
-        comparacoes, alfa=alfa, correcoes=correcoes, bootstraps=bootstraps, posteriores=posteriores_lista
+    quality_issues = avaliar_qualidade(df) if quality_issues is None else quality_issues
+    comparacoes = comparar_todos_os_grupos(df) if comparacoes is None else comparacoes
+    correcoes = (
+        corrigir_multiplas_comparacoes(comparacoes, alfa=alfa) if correcoes is None else correcoes
+    )
+    bootstraps = bootstrap_todos_os_grupos(df) if bootstraps is None else bootstraps
+    posteriores_lista = (
+        posterior_todos_os_grupos(df) if posteriores_lista is None else posteriores_lista
+    )
+    decisoes = (
+        decidir_todos(
+            comparacoes, alfa=alfa, correcoes=correcoes, bootstraps=bootstraps, posteriores=posteriores_lista
+        )
+        if decisoes is None
+        else decisoes
     )
     resultados = [
         (comparacao, decisao, growth_lens(df, decisao))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -39,11 +40,18 @@ class ComparacaoPareada:
     wilcoxon_p_valor: float
 
 
+def _chave_ordenacao_natural(rotulo: str) -> list:
+    """Divide o rótulo em pedaços texto/número para comparar números pelo valor, não como
+    string — sem isso, 'Grupo 10' viria antes de 'Grupo 2' (comparação lexicográfica)."""
+    return [int(parte) if parte.isdigit() else parte.lower() for parte in re.split(r"(\d+)", rotulo)]
+
+
 def inferir_grupo_baseline(grupos: list[str]) -> str:
     """Sem convenção explícita no dataset, assume o grupo de menor rótulo em ordem natural
-    (ex: 'Grupo 1' antes de 'Grupo 2') como baseline. Não depende de nome de parceiro/grupo
-    específico — funciona para qualquer rotulagem consistente entre os testes."""
-    return min(grupos)
+    (ex: 'Grupo 1' antes de 'Grupo 2', e 'Grupo 2' antes de 'Grupo 10') como baseline. Não
+    depende de nome de parceiro/grupo específico — funciona para qualquer rotulagem
+    consistente entre os testes."""
+    return min(grupos, key=_chave_ordenacao_natural)
 
 
 def _parear_por_data(df_parceiro: pd.DataFrame, baseline: str, variante: str, coluna: str) -> pd.DataFrame:
@@ -118,22 +126,32 @@ def corrigir_benjamini_hochberg(p_valores: list[float], alfa: float = 0.05) -> l
 
     Devolve, na mesma ordem de entrada, (p_valor_ajustado, significativo_apos_correcao).
     Genérica sobre qualquer lista de p-valores — sem acoplamento a `ComparacaoPareada`.
+
+    p-valores NaN (ex: teste com variância zero na diferença diária) são excluídos do
+    cálculo e devolvidos como (nan, False) — nunca participam do ranking nem podem herdar
+    por acidente o valor ajustado de um p-valor vizinho, o que os marcaria como
+    "significativo" sem nenhuma evidência estatística real por trás.
     """
     m = len(p_valores)
     if m == 0:
         return []
 
-    ordem = sorted(range(m), key=lambda i: p_valores[i])
-    p_ajustados = [0.0] * m
+    indices_validos = [i for i in range(m) if pd.notna(p_valores[i])]
+    p_ajustados: list[float] = [float("nan")] * m
+    significativos = [False] * m
 
-    menor_ate_agora = 1.0
-    for rank in range(m, 0, -1):
-        idx = ordem[rank - 1]
-        candidato = p_valores[idx] * m / rank
-        menor_ate_agora = min(menor_ate_agora, candidato, 1.0)
-        p_ajustados[idx] = menor_ate_agora
+    m_validos = len(indices_validos)
+    if m_validos > 0:
+        ordem = sorted(indices_validos, key=lambda i: p_valores[i])
+        menor_ate_agora = 1.0
+        for rank in range(m_validos, 0, -1):
+            idx = ordem[rank - 1]
+            candidato = p_valores[idx] * m_validos / rank
+            menor_ate_agora = min(menor_ate_agora, candidato, 1.0)
+            p_ajustados[idx] = menor_ate_agora
+            significativos[idx] = menor_ate_agora < alfa
 
-    return [(p_ajustados[i], p_ajustados[i] < alfa) for i in range(m)]
+    return list(zip(p_ajustados, significativos))
 
 
 @dataclass
