@@ -5,10 +5,13 @@ import pandas as pd
 import pytest
 
 from engine.stats_frequentist import (
+    ComparacaoPareada,
     ParDadosInsuficientesError,
     calcular_margem,
     comparar_grupo,
     comparar_todos_os_grupos,
+    corrigir_benjamini_hochberg,
+    corrigir_multiplas_comparacoes,
     inferir_grupo_baseline,
 )
 
@@ -138,6 +141,79 @@ def test_comparar_todos_os_grupos_ignora_parceiro_com_um_grupo_so():
         "Grupo 1": _serie_base(datas, compradores=[100] * 10, comissao=[1000.0] * 10, cashback=[200.0] * 10),
     })
     assert comparar_todos_os_grupos(df) == []
+
+
+def _comparacao_dummy(parceiro: str, grupo_variante: str, t_p_valor: float, wilcoxon_p_valor: float) -> ComparacaoPareada:
+    """Constrói uma ComparacaoPareada só com os campos relevantes pra correção múltipla —
+    os demais são preenchidos com valores neutros, sem afetar o resultado do teste."""
+    return ComparacaoPareada(
+        parceiro=parceiro,
+        grupo_baseline="Grupo 1",
+        grupo_variante=grupo_variante,
+        coluna="margem",
+        n_dias_pareados=30,
+        media_baseline=1000.0,
+        media_variante=1050.0,
+        media_diferenca=50.0,
+        desvio_padrao_diferenca=10.0,
+        ic95_diferenca=(10.0, 90.0),
+        t_estatistica=2.5,
+        t_p_valor=t_p_valor,
+        wilcoxon_estatistica=100.0,
+        wilcoxon_p_valor=wilcoxon_p_valor,
+    )
+
+
+def test_corrigir_benjamini_hochberg_lista_vazia():
+    assert corrigir_benjamini_hochberg([]) == []
+
+
+def test_corrigir_benjamini_hochberg_valor_unico_fica_igual():
+    p_ajustado, significativo = corrigir_benjamini_hochberg([0.03])[0]
+    assert p_ajustado == pytest.approx(0.03)
+    assert significativo is True
+
+
+def test_corrigir_benjamini_hochberg_contra_calculo_manual():
+    # p = [0.001, 0.002, 0.003, 0.9], m=4 — q(i) = p(i)*m/i em ordem: 0.004, 0.004, 0.004, 0.9
+    # (cummin do maior rank pro menor não altera nada aqui, já é monótono)
+    resultado = corrigir_benjamini_hochberg([0.001, 0.002, 0.003, 0.9], alfa=0.05)
+    ajustados = [p for p, _ in resultado]
+    assert ajustados[0] == pytest.approx(0.004)
+    assert ajustados[1] == pytest.approx(0.004)
+    assert ajustados[2] == pytest.approx(0.004)
+    assert ajustados[3] == pytest.approx(0.9)
+    assert [sig for _, sig in resultado] == [True, True, True, False]
+
+
+def test_corrigir_benjamini_hochberg_desfaz_significancia_isolada_em_lote_ruidoso():
+    # um p-valor aparentemente significativo (0.03) sozinho, cercado de 4 testes claramente
+    # sem efeito (0.5) — é exatamente o cenário que a correção existe para pegar: rodando
+    # "dezenas de testes por mês", 1 em 5 "significativo" isolado é mais coerente com falso
+    # positivo do que com efeito real.
+    p_valores = [0.03, 0.5, 0.5, 0.5, 0.5]
+    resultado = corrigir_benjamini_hochberg(p_valores, alfa=0.05)
+    p_ajustado_isolado, significativo_isolado = resultado[0]
+    assert p_ajustado_isolado > 0.05  # não sobrevive à correção
+    assert significativo_isolado is False
+    assert p_ajustado_isolado > p_valores[0]  # correção sempre infla ou mantém, nunca reduz
+
+
+def test_corrigir_multiplas_comparacoes_lista_vazia():
+    assert corrigir_multiplas_comparacoes([]) == []
+
+
+def test_corrigir_multiplas_comparacoes_exige_concordancia_entre_t_e_wilcoxon():
+    comparacoes = [
+        _comparacao_dummy("Parceiro X", "Grupo 2", t_p_valor=0.01, wilcoxon_p_valor=0.01),
+        _comparacao_dummy("Parceiro Y", "Grupo 2", t_p_valor=0.01, wilcoxon_p_valor=0.5),  # diverge
+        _comparacao_dummy("Parceiro Z", "Grupo 2", t_p_valor=0.5, wilcoxon_p_valor=0.5),
+    ]
+    resultado = corrigir_multiplas_comparacoes(comparacoes, alfa=0.05)
+    assert len(resultado) == 3
+    assert resultado[1].significativo_corrigido is False  # t e wilcoxon divergem
+    assert resultado[2].significativo_corrigido is False  # nenhum dos dois é significativo
+    assert resultado[0].comparacao is comparacoes[0]
 
 
 @pytest.mark.parametrize("arquivo", [

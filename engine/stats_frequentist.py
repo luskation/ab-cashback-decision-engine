@@ -109,6 +109,74 @@ def comparar_grupo(
     )
 
 
+def corrigir_benjamini_hochberg(p_valores: list[float], alfa: float = 0.05) -> list[tuple[float, bool]]:
+    """Correção de Benjamini-Hochberg (FDR) para um lote de p-valores.
+
+    Contexto (seção 2.10 do plano): rodando "dezenas de testes por mês", não corrigir infla a
+    taxa de falso positivo ao longo do tempo — um p-valor isolado abaixo de 0.05 dentro de um
+    lote maior tem mais chance de ser ruído do que o mesmo p-valor visto sozinho.
+
+    Devolve, na mesma ordem de entrada, (p_valor_ajustado, significativo_apos_correcao).
+    Genérica sobre qualquer lista de p-valores — sem acoplamento a `ComparacaoPareada`.
+    """
+    m = len(p_valores)
+    if m == 0:
+        return []
+
+    ordem = sorted(range(m), key=lambda i: p_valores[i])
+    p_ajustados = [0.0] * m
+
+    menor_ate_agora = 1.0
+    for rank in range(m, 0, -1):
+        idx = ordem[rank - 1]
+        candidato = p_valores[idx] * m / rank
+        menor_ate_agora = min(menor_ate_agora, candidato, 1.0)
+        p_ajustados[idx] = menor_ate_agora
+
+    return [(p_ajustados[i], p_ajustados[i] < alfa) for i in range(m)]
+
+
+@dataclass
+class CorrecaoMultipla:
+    """Resultado da correção de Benjamini-Hochberg para uma comparação dentro de um lote.
+
+    Não decide nada sozinha — `decision.py` (Fase 13) é quem reconcilia isso com as demais
+    camadas opcionais. Até lá, fica disponível para quem quiser consultar/reportar.
+    """
+
+    comparacao: ComparacaoPareada
+    t_p_valor_ajustado: float
+    wilcoxon_p_valor_ajustado: float
+    significativo_corrigido: bool
+
+
+def corrigir_multiplas_comparacoes(
+    comparacoes: list[ComparacaoPareada], alfa: float = 0.05
+) -> list[CorrecaoMultipla]:
+    """Aplica Benjamini-Hochberg separadamente sobre t e Wilcoxon de um lote de comparações
+    (ex: todos os testes A/B processados numa mesma rodada), exigindo que os dois concordem
+    sobre significância após a correção — mesmo critério de concordância já usado em
+    `decision.py` para o resultado sem correção, aplicado aqui à versão corrigida.
+    """
+    if not comparacoes:
+        return []
+
+    t_corrigidos = corrigir_benjamini_hochberg([c.t_p_valor for c in comparacoes], alfa=alfa)
+    w_corrigidos = corrigir_benjamini_hochberg([c.wilcoxon_p_valor for c in comparacoes], alfa=alfa)
+
+    return [
+        CorrecaoMultipla(
+            comparacao=comparacao,
+            t_p_valor_ajustado=t_ajustado,
+            wilcoxon_p_valor_ajustado=w_ajustado,
+            significativo_corrigido=t_significativo and w_significativo,
+        )
+        for comparacao, (t_ajustado, t_significativo), (w_ajustado, w_significativo) in zip(
+            comparacoes, t_corrigidos, w_corrigidos
+        )
+    ]
+
+
 def comparar_todos_os_grupos(
     df: pd.DataFrame, coluna: str = "margem", grupo_baseline: str | None = None
 ) -> list[ComparacaoPareada]:
